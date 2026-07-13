@@ -6,7 +6,7 @@
 const char* ssid = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
 
-// Pin Definitions
+// Your Original Hardwired Pins
 #define STEP_PIN 2
 #define DIR_PIN 3
 #define BTN_CW 4
@@ -24,7 +24,6 @@ enum MotorState { STOPPED, MOVING_CW, MOVING_CCW };
 MotorState webState = STOPPED;
 
 // --- HTML for iOS Web App ---
-// Contains Apple meta tags to look and feel like a native app
 const char* htmlPage = R"rawliteral(
 <!DOCTYPE html>
 <html>
@@ -35,9 +34,9 @@ const char* htmlPage = R"rawliteral(
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Motor Control</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #1c1c1e; color: white; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #1c1c1e; color: white; user-select: none; }
     h1 { margin-bottom: 40px; font-weight: 600; }
-    .btn { background-color: #007aff; color: white; border: none; padding: 20px 40px; font-size: 24px; border-radius: 14px; margin: 15px; width: 80%; max-width: 300px; touch-action: manipulation; }
+    .btn { background-color: #007aff; color: white; border: none; padding: 20px 40px; font-size: 24px; border-radius: 14px; margin: 15px; width: 80%; max-width: 300px; touch-action: manipulation; cursor: pointer; }
     .btn:active { background-color: #005bb5; }
     .stop-btn { background-color: #ff3b30; }
     .stop-btn:active { background-color: #c92a20; }
@@ -45,13 +44,13 @@ const char* htmlPage = R"rawliteral(
 </head>
 <body>
   <h1>Stepper Control</h1>
-  <button class="btn" onmousedown="sendCommand('/cw')" ontouchstart="sendCommand('/cw')" onmouseup="sendCommand('/stop')" ontouchend="sendCommand('/stop')">Clockwise</button>
-  <button class="btn" onmousedown="sendCommand('/ccw')" ontouchstart="sendCommand('/ccw')" onmouseup="sendCommand('/stop')" ontouchend="sendCommand('/stop')">Anti-Clockwise</button>
+  <button class="btn" onpointerdown="sendCommand('/cw')" onpointerup="sendCommand('/stop')" onpointerleave="sendCommand('/stop')">Clockwise</button>
+  <button class="btn" onpointerdown="sendCommand('/ccw')" onpointerup="sendCommand('/stop')" onpointerleave="sendCommand('/stop')">Anti-Clockwise</button>
   <button class="btn stop-btn" onclick="sendCommand('/stop')">Emergency Stop</button>
 
   <script>
     function sendCommand(cmd) {
-      fetch(cmd);
+      fetch(cmd).catch(err => console.error(err));
     }
   </script>
 </body>
@@ -61,23 +60,17 @@ const char* htmlPage = R"rawliteral(
 void setup() {
   Serial.begin(115200);
 
-  // Configure Button Pins
+  // Configure Buttons to use internal Pull-Up resistors for GND wiring
   pinMode(BTN_CW, INPUT_PULLUP);
   pinMode(BTN_CCW, INPUT_PULLUP);
 
-  // Configure Stepper
+  // Configure Stepper Max Speed and Acceleration limits
   stepper.setMaxSpeed(2000.0);
   stepper.setAcceleration(1000.0);
 
-  // Connect to Wi-Fi
+  // Non-blocking background Wi-Fi initiation
   WiFi.begin(ssid, password);
-  Serial.print("Connecting to Wi-Fi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nConnected! IP Address: ");
-  Serial.println(WiFi.localIP());
+  Serial.println("Wi-Fi connecting in background... Buttons are active now!");
 
   // Web Server Routes
   server.on("/", []() {
@@ -103,22 +96,26 @@ void setup() {
 }
 
 void loop() {
-  server.handleClient();
+  // Only handle network traffic if Wi-Fi is actively connected
+  if (WiFi.status() == WL_CONNECTED) {
+    server.handleClient();
+  }
 
-  // Read physical buttons (LOW means pressed due to INPUT_PULLUP)
+  // Read physical buttons (LOW means pressed because completing circuit to GND)
   bool cwPressed = (digitalRead(BTN_CW) == LOW);
   bool ccwPressed = (digitalRead(BTN_CCW) == LOW);
 
-  // Determine current commanded state (Physical overrides Web)
+  // Determine targeted speed based on inputs (Physical overrides Web command)
   if (cwPressed || webState == MOVING_CW) {
     stepper.setSpeed(targetSpeed);
-    stepper.runSpeed();
   } 
   else if (ccwPressed || webState == MOVING_CCW) {
     stepper.setSpeed(-targetSpeed);
-    stepper.runSpeed();
   } 
   else {
-    stepper.setSpeed(0); // Stop moving
+    stepper.setSpeed(0);
   }
+
+  // Generate steps cleanly and smoothly every single CPU cycle
+  stepper.runSpeed();
 }
